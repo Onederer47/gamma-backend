@@ -92,9 +92,12 @@ app.get("/products", async (req, res) => {
 
         res.json(products);
 
-    } catch (err) {
-        console.error("ERROR:", err.response?.data || err.message);
-        res.status(500).json({ error: "Ошибка получения товаров" });
+    } catch (error) {
+        console.error("ERROR:", error.response?.data || error.message);
+        res.status(500).json({
+            error: "Ошибка получения товаров",
+            details: error.response?.data || error.message
+        });
     }
 });
 
