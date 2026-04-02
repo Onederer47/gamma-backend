@@ -15,11 +15,6 @@ app.use("/img", express.static("img"));
 // ===== CONFIG =====
 const MOYSKLAD_API = "https://api.moysklad.ru/api/remap/1.2";
 
-const headers = {
-    Authorization: `Bearer ${process.env.MOYSKLAD_TOKEN}`,
-    "Content-Type": "application/json",
-};
-
 // ImageMap
 const imageMap = {
     "002d7461-01b1-11f1-0a80-0fda001056d8": "https://i.postimg.cc/ZnFFP44m/Photoroom-20260324-174803756.png",
@@ -27,7 +22,7 @@ const imageMap = {
 };
 
 // ===== CACHE =====
-const CACHE_TTL = 5 * 60 * 1000; // 5 минут
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 let productsCache = null;
 let productsCacheTime = 0;
 
@@ -37,21 +32,31 @@ let lastRequestTime = 0;
 // ===== PRODUCTS =====
 app.get("/products", async (req, res) => {
     const now = Date.now();
-    console.log("➡️ /products запрос");
+    console.log("Request: /products");
+    console.log("TOKEN:", process.env.MOYSKLAD_TOKEN);
 
-    // 🚫 защита от частых запросов
+    if (!process.env.MOYSKLAD_TOKEN) {
+        return res.status(500).json({ error: "No token" });
+    }
+
+    const headers = {
+        Authorization: `Bearer ${process.env.MOYSKLAD_TOKEN}`,
+        "Content-Type": "application/json"
+    };
+
+    // Anti-spam protection
     if (now - lastRequestTime < 1000) {
         return res.status(429).json({ error: "Too many requests" });
     }
     lastRequestTime = now;
 
-    // 📦 кеш
+    // Cache
     if (productsCache && now - productsCacheTime < CACHE_TTL) {
-        console.log("📦 FROM CACHE");
+        console.log("FROM CACHE");
         return res.json(productsCache);
     }
 
-    console.log("🌐 FROM MOYSKLAD");
+    console.log("FROM MOYSKLAD");
 
     try {
         const { data } = await axios.get(
@@ -60,7 +65,7 @@ app.get("/products", async (req, res) => {
                 headers,
                 params: {
                     limit: 50,
-                    // expand: "images" ← пока НЕ используем (ломает стабильность)
+                    // expand: "images" disabled for stability
                 },
             }
         );
@@ -72,7 +77,7 @@ app.get("/products", async (req, res) => {
                 ? item.salePrices[0].value / 100
                 : 0,
 
-            // ❗ пока без картинок (самый стабильный вариант)
+            // Stable option without image expansion
             image: imageMap[item.id] || null,
 
             category: item.pathName
@@ -88,13 +93,24 @@ app.get("/products", async (req, res) => {
         res.json(products);
 
     } catch (err) {
-        console.error("❌ ERROR:", err.response?.data || err.message);
+        console.error("ERROR:", err.response?.data || err.message);
         res.status(500).json({ error: "Ошибка получения товаров" });
     }
 });
 
 // ===== TEST =====
 app.get("/test", async (req, res) => {
+    console.log("TOKEN:", process.env.MOYSKLAD_TOKEN);
+
+    if (!process.env.MOYSKLAD_TOKEN) {
+        return res.status(500).json({ error: "No token" });
+    }
+
+    const headers = {
+        Authorization: `Bearer ${process.env.MOYSKLAD_TOKEN}`,
+        "Content-Type": "application/json"
+    };
+
     try {
         const response = await axios.get(
             `${MOYSKLAD_API}/entity/product?limit=1`,
@@ -103,7 +119,7 @@ app.get("/test", async (req, res) => {
 
         res.json(response.data);
     } catch (e) {
-        console.error("❌ TEST ERROR:", e.response?.data || e.message);
+        console.error("TEST ERROR:", e.response?.data || e.message);
         res.status(500).json({
             error: "test failed",
             details: e.response?.data || e.message,
@@ -118,20 +134,30 @@ const imageCache = new Map();
 
 app.get("/image/:id", async (req, res) => {
     const { id } = req.params;
+    console.log("TOKEN:", process.env.MOYSKLAD_TOKEN);
+
+    if (!process.env.MOYSKLAD_TOKEN) {
+        return res.status(500).json({ error: "No token" });
+    }
+
+    const headers = {
+        Authorization: `Bearer ${process.env.MOYSKLAD_TOKEN}`,
+        "Content-Type": "application/json"
+    };
 
     try {
-        // если есть в кеше — отдаём сразу
+        // Return cached image immediately if present
         if (imageCache.has(id)) {
-            console.log("🖼 FROM CACHE:", id);
+            console.log("IMAGE FROM CACHE:", id);
             const cached = imageCache.get(id);
 
             res.setHeader("Content-Type", cached.contentType);
             return res.send(cached.buffer);
         }
 
-        console.log("🌐 LOAD IMAGE:", id);
+        console.log("LOAD IMAGE:", id);
 
-        // получаем товар с картинкой
+        // Load product with expanded images
         const { data } = await axios.get(
             `${MOYSKLAD_API}/entity/product/${id}`,
             {
@@ -146,7 +172,7 @@ app.get("/image/:id", async (req, res) => {
             return res.status(404).send("No image");
         }
 
-        // скачиваем картинку
+        // Download image binary
         const imageResponse = await axios.get(imageMeta.downloadHref, {
             headers,
             responseType: "arraybuffer"
@@ -155,7 +181,7 @@ app.get("/image/:id", async (req, res) => {
         const buffer = Buffer.from(imageResponse.data);
         const contentType = imageResponse.headers["content-type"];
 
-        // сохраняем в кеш
+        // Save image to cache
         imageCache.set(id, {
             buffer,
             contentType,
@@ -166,7 +192,7 @@ app.get("/image/:id", async (req, res) => {
         res.send(buffer);
 
     } catch (err) {
-        console.error("❌ IMAGE ERROR:", err.message);
+        console.error("IMAGE ERROR:", err.message);
         res.status(500).send("Error loading image");
     }
 });
@@ -174,5 +200,5 @@ app.get("/image/:id", async (req, res) => {
 
 // ===== START =====
 app.listen(process.env.PORT || 3000, () => {
-    console.log("🚀 GAMMA backend запущен");
+    console.log("GAMMA backend started");
 });
